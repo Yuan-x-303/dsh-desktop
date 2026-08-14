@@ -16,7 +16,7 @@
     "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\""
   },
   "dependencies": {
-    "@deepseek-ai/dsh": "^0.1.0-rc.6"
+    "@deepseek-ai/dsh": "0.1.0-rc.6"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
