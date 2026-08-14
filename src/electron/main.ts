@@ -1,5 +1,6 @@
 import { join } from 'node:path';
-import { app, BrowserWindow, shell } from 'electron';
+import { app, BrowserWindow, dialog, shell } from 'electron';
+import { autoUpdater } from 'electron-updater';
 import { launchDsh, type DshLaunchResult } from './dsh';
 
 // Windows: a stable AppUserModelID groups taskbar icons and enables notifications.
@@ -35,6 +36,7 @@ if (!app.requestSingleInstanceLock()) {
   app.whenReady().then(() => {
     mainWindow = createWindow();
     startDsh();
+    setupAutoUpdater();
   });
 }
 
@@ -136,6 +138,38 @@ function startDsh(): void {
 function showError(message: string, logs: string[]): void {
   if (!mainWindow || mainWindow.isDestroyed()) return;
   mainWindow.loadURL(dataUrl(errorHtml(message, logs)));
+}
+
+function setupAutoUpdater(): void {
+  // Only the installed build can self-update: the portable exe has no install
+  // location, and dev has no app-update.yml. Update checks must never break
+  // startup, so every failure is swallowed with a warning.
+  if (!app.isPackaged) return;
+
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+
+  autoUpdater.on('update-downloaded', () => {
+    if (quitting) return;
+    const choice = dialog.showMessageBoxSync({
+      type: 'info',
+      title: 'Update ready',
+      message: 'A new version of DSH Desktop has been downloaded.',
+      detail: 'Restart now to install it, or it will be installed the next time you quit.',
+      buttons: ['Restart now', 'Later'],
+      defaultId: 0,
+      cancelId: 1,
+    });
+    if (choice === 0) autoUpdater.quitAndInstall();
+  });
+
+  autoUpdater.on('error', (err) => {
+    console.warn('[dsh-desktop] update check failed:', err?.message ?? err);
+  });
+
+  autoUpdater.checkForUpdates().catch((err) => {
+    console.warn('[dsh-desktop] update check failed:', err?.message ?? err);
+  });
 }
 
 function dataUrl(html: string): string {

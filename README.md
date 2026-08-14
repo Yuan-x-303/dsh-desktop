@@ -139,6 +139,27 @@ Harness version ships, bump it by hand:
 > exist **because** of step 4 — they are the peer dependencies the launcher must
 > declare so electron-builder includes them. Keep them when upgrading.
 
+## Auto-update
+
+The installed build checks for updates on launch (the portable build cannot
+self-update). New versions are served from GitHub Releases via
+[electron-updater](https://www.electron.build/auto-update).
+
+To wire it up:
+
+1. Create a GitHub repo and push this project.
+2. In `electron-builder.yml`, replace `publish.owner` (currently
+   `YOUR_GITHUB_USERNAME`) with your GitHub username.
+3. Push a version tag — `git tag v0.3.0 && git push origin --tags` — and the
+   release workflow builds, publishes the installer + `latest.yml` + blockmap
+   to GitHub Releases.
+4. If the release is created as a draft, click **Publish** on the release page
+   so installed apps can see it.
+
+End users then get a "restart to update" prompt automatically; no re-download
+is needed. Note: binaries are not code-signed yet, so antivirus may flag the
+downloaded update just as it does the initial installer.
+
 ## Contributing
 
 PRs welcome. Regenerate assets with `npm run icon` and `npm run fetch:node` as

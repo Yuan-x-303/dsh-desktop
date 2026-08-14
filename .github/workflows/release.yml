@@ -31,13 +31,7 @@ jobs:
       - name: Compile TypeScript
         run: npm run build
 
-      - name: Build Windows artifacts
-        run: npx electron-builder --win --publish never
-
-      - name: Publish release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: release/*.exe
-          generate_release_notes: true
+      - name: Build and publish
+        run: npx electron-builder --win --publish always
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

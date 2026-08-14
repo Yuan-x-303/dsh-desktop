@@ -2,6 +2,13 @@ appId: com.dsh.desktop
 productName: DSH Desktop
 copyright: Copyright © 2026 DSH_Yuan
 
+# Where the app checks for updates (baked into the packaged app as app-update.yml).
+# Replace owner/repo with your real GitHub repo before publishing.
+publish:
+  provider: github
+  owner: YOUR_GITHUB_USERNAME
+  repo: dsh-desktop
+
 directories:
   output: release
   buildResources: build
