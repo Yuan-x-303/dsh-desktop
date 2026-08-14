@@ -114,6 +114,31 @@ config.example.json         configuration template
 - **`npm run dist` refuses to run** — DSH Desktop is still running from
   `release\win-unpacked`; close it first (see the Build section).
 
+## Upgrading DeepSeek Harness
+
+The desktop shell is a thin wrapper; all features come from the bundled
+`@deepseek-ai/dsh` package, which does **not** update automatically. When a new
+Harness version ships, bump it by hand:
+
+1. Set the new version in `package.json`:
+   ```json
+   "@deepseek-ai/dsh": "0.2.0"
+   ```
+2. `npm install`
+3. `npm run dist`
+4. `npm run check:deps` — the dsh ecosystem declares many plugins as
+   `peerDependencies`, which electron-builder does **not** bundle. This script
+   diffs the dev and packaged `@deepseek-ai` trees and prints any missing
+   package (with its exact version) plus a JSON snippet to paste into
+   `package.json`'s `dependencies`. Re-run `npm install && npm run dist` until
+   it reports no gaps.
+5. Smoke-test `release\win-unpacked\DSH Desktop.exe`.
+6. Bump the app version, then `git tag v0.3.0 && git push origin --tags`.
+
+> The explicit `@deepseek-ai/*` entries in `package.json`'s `dependencies`
+> exist **because** of step 4 — they are the peer dependencies the launcher must
+> declare so electron-builder includes them. Keep them when upgrading.
+
 ## Contributing
 
 PRs welcome. Regenerate assets with `npm run icon` and `npm run fetch:node` as

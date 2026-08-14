@@ -13,6 +13,7 @@
     "fetch:node": "node scripts/fetch-node.mjs",
     "predist": "node scripts/guard-dist.mjs",
     "dist": "npm run fetch:node && npm run build && electron-builder --win",
+    "check:deps": "node scripts/check-deps.mjs",
     "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\""
   },
   "dependencies": {
