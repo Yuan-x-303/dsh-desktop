@@ -5,12 +5,14 @@ One-click desktop launcher for [DeepSeek Harness](https://github.com/deepseek-ai
 - **Zero dependency**: a portable Node.js runtime is bundled, so `dsh web` runs out of the box.
 - **Portable & installable**: ship a single `.exe` (portable) or a per-user installer (NSIS).
 - **Auto port**: passes `--port 0` and parses the real URL from stdout — no port clashes.
+- **Loopback only**: forces `--host 127.0.0.1`, so the Harness server is never exposed to the LAN.
 - **Single instance**: launching again focuses the existing window.
-- **Clean lifecycle**: closing the window stops `dsh`; if `dsh` crashes, the app closes.
+- **Clean lifecycle**: closing the window stops `dsh` and its child processes; if `dsh` crashes, the app closes.
+- **Friendly startup**: a loading screen is shown while `dsh` boots; failures show the captured log.
 
 ## Install
 
-Download the latest release from the [Releases](https://github.com/<owner>/dsh-desktop/releases) page:
+Download the latest release from the **Releases** page of this repository:
 
 - `DSH-Desktop-<version>-setup.exe` — installer (per-user, no admin rights needed).
 - `DSH-Desktop-<version>-portable.exe` — portable, no install.
@@ -19,7 +21,7 @@ Windows SmartScreen may warn on first run because binaries are not yet code-sign
 
 ## Develop
 
-Requirements: Node.js ≥ 20 (verified on v24).
+Requirements: Node.js ≥ 20 (verified on v24). Built against `@deepseek-ai/dsh` 0.1.0-rc.6.
 
 ```bash
 npm install
@@ -35,6 +37,11 @@ npm run dist       # fetch Node runtime + compile + electron-builder --win
 Artifacts land in `release/`. The first build downloads the portable Node runtime
 (once, cached in `resources/runtime/node.exe`) and electron-builder's NSIS tooling.
 
+> `npm run dist` refuses to run while DSH Desktop is running from
+> `release\win-unpacked` (the build clears that directory, and a running app
+> locks its files). Close the app first, or set `SKIP_GUARD=1` if you know
+> what you are doing.
+
 ## Configuration
 
 The launcher reads a `config.json` (optional). It is looked up, in order:
@@ -49,8 +56,8 @@ See [`config.example.json`](config.example.json):
 
 ```json
 {
-  "workspace": "E:\\Deepseek Harness\\workspace",
-  "home": "E:\\Deepseek Harness\\.dsh"
+  "workspace": "C:\\Users\\<you>\\dsh-workspace",
+  "home": "C:\\Users\\<you>\\.dsh"
 }
 ```
 
@@ -74,9 +81,10 @@ Environment variables:
 ```
 start.bat (dev only)
    └─ electron .            main process
-        ├─ spawn <node> dsh web --port 0    (bundled Node in packaged builds)
+        ├─ spawn <node> dsh web --host 127.0.0.1 --port 0   (bundled Node in packaged builds)
         ├─ parse stdout: "dsh web: http://127.0.0.1:PORT"
-        └─ open BrowserWindow at that URL
+        ├─ show a loading screen while dsh boots
+        └─ open BrowserWindow at that URL (external links go to the system browser)
 ```
 
 `node_modules` is shipped unpacked (`asar: false`) so the bundled Node can read
@@ -86,13 +94,25 @@ because `dsh` runs under the bundled Node, not inside Electron.
 ## Project structure
 
 ```
-src/electron/main.ts        window + lifecycle
+src/electron/main.ts        window + lifecycle + navigation guard
 src/electron/dsh.ts         spawn dsh + resolve bundled Node / dsh bin
 scripts/fetch-node.mjs      download portable Node runtime
 scripts/generate-icon.mjs   regenerate build/icon.png & build/icon.ico
+scripts/guard-dist.mjs      predist guard: refuse to package while the app is running
 electron-builder.yml        packaging config (NSIS + portable)
 config.example.json         configuration template
 ```
+
+## Troubleshooting
+
+- **Windows SmartScreen warning on first run** — the binaries are not code-signed
+  yet; click **More info → Run anyway**.
+- **First launch is slow** — the first boot installs the profile's plugins under
+  `$DSH_HOME/profiles`; subsequent launches are fast.
+- **Where is my data?** — sessions/settings live under the configured `home`
+  (default `~/.dsh`), workspace files under `workspace` (default `~/dsh-workspace`).
+- **`npm run dist` refuses to run** — DSH Desktop is still running from
+  `release\win-unpacked`; close it first (see the Build section).
 
 ## Contributing
 
