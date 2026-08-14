@@ -80,12 +80,21 @@ interface DesktopConfig {
   home?: string;
 }
 
-/** Candidate locations for config.json (dev: project root). */
+/** User-level config for packaged builds: %APPDATA%\dsh-desktop\config.json. */
+function userConfigPath(): string | null {
+  const appData = process.env.APPDATA;
+  if (!appData) return null;
+  return join(appData, 'dsh-desktop', 'config.json');
+}
+
+/** Candidate locations for config.json, in priority order. */
 function configCandidates(): string[] {
-  return [
-    join(__dirname, '..', '..', 'config.json'), // dist/electron → project root
+  const candidates: (string | null)[] = [
+    join(__dirname, '..', '..', 'config.json'), // dev: dist/electron → project root
+    userConfigPath(), // packaged build + shared user-level override
     join(process.cwd(), 'config.json'),
   ];
+  return candidates.filter((p): p is string => typeof p === 'string');
 }
 
 function loadConfig(): DesktopConfig {

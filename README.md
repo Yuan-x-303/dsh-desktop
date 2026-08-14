@@ -37,8 +37,15 @@ Artifacts land in `release/`. The first build downloads the portable Node runtim
 
 ## Configuration
 
-The launcher reads `config.json` (optional, at the project root in dev). See
-[`config.example.json`](config.example.json):
+The launcher reads a `config.json` (optional). It is looked up, in order:
+
+1. `<project>/config.json` — development only.
+2. `%APPDATA%\dsh-desktop\config.json` — **packaged builds** and a shared
+   user-level override (this is where you point an installed/portable build at
+   your existing workspace and DSH data).
+3. `./config.json` (process working directory).
+
+See [`config.example.json`](config.example.json):
 
 ```json
 {
