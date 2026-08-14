@@ -1,6 +1,6 @@
 import { join } from 'node:path';
 import { app, BrowserWindow, shell } from 'electron';
-import { launchDsh } from './dsh';
+import { launchDsh, type DshLaunchResult } from './dsh';
 
 // Windows: a stable AppUserModelID groups taskbar icons and enables notifications.
 app.setAppUserModelId('com.dsh.desktop');
@@ -95,10 +95,19 @@ function createWindow(): BrowserWindow {
 }
 
 function startDsh(): void {
-  const { child, url, logs, stop } = launchDsh({
-    port: 0,
-    timeoutMs: STARTUP_TIMEOUT_MS,
-  });
+  // launchDsh can throw synchronously (unusable workspace/home from config,
+  // missing dsh package). Surface that on the error page instead of leaving
+  // the loading screen up forever.
+  let launch: DshLaunchResult;
+  try {
+    launch = launchDsh({ port: 0, timeoutMs: STARTUP_TIMEOUT_MS });
+  } catch (err) {
+    if (quitting) return;
+    showError(err instanceof Error ? err.message : String(err), []);
+    return;
+  }
+
+  const { child, url, logs, stop } = launch;
   stopDsh = stop;
 
   child.on('exit', (code) => {

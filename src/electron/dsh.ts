@@ -135,6 +135,16 @@ function resolveHome(options: DshLaunchOptions): string {
   return join(homedir(), '.dsh');
 }
 
+/** Create a directory, or throw a clear error naming the setting and path. */
+function ensureDir(dir: string, what: string): void {
+  try {
+    mkdirSync(dir, { recursive: true });
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    throw new Error(`The configured ${what} "${dir}" cannot be created: ${detail}`);
+  }
+}
+
 export function launchDsh(options: DshLaunchOptions = {}): DshLaunchResult {
   const dshBin = resolveDshBin();
   const nodeBin = resolveNodeBin();
@@ -154,8 +164,8 @@ export function launchDsh(options: DshLaunchOptions = {}): DshLaunchResult {
 
   const workspace = resolveWorkspace(options);
   const home = resolveHome(options);
-  mkdirSync(workspace, { recursive: true });
-  mkdirSync(home, { recursive: true });
+  ensureDir(workspace, 'workspace');
+  ensureDir(home, 'home');
 
   const child = spawn(nodeBin, args, {
     cwd: workspace,
