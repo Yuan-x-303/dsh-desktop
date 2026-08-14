@@ -1,6 +1,9 @@
 import { app, BrowserWindow } from 'electron';
 import { launchDsh } from './dsh';
 
+// Windows: a stable AppUserModelID groups taskbar icons and enables notifications.
+app.setAppUserModelId('com.dsh.desktop');
+
 let mainWindow: BrowserWindow | null = null;
 let stopDsh: (() => void) | null = null;
 let quitting = false;

@@ -2,5 +2,7 @@ node_modules/
 dist/
 .npm-cache/
 .electron-cache/
+release/
+resources/runtime/
 *.log
 config.json

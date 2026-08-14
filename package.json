@@ -2,11 +2,16 @@
   "name": "dsh-desktop",
   "version": "0.1.0",
   "private": true,
-  "description": "One-click desktop shell for DeepSeek Harness (MVP)",
+  "description": "One-click desktop launcher for DeepSeek Harness",
+  "author": "DSH Desktop contributors",
+  "license": "MIT",
   "main": "dist/electron/main.js",
   "scripts": {
     "build": "tsc",
     "start": "npm run build && electron .",
+    "icon": "node scripts/generate-icon.mjs",
+    "fetch:node": "node scripts/fetch-node.mjs",
+    "dist": "npm run fetch:node && npm run build && electron-builder --win",
     "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\""
   },
   "dependencies": {
@@ -15,6 +20,7 @@
   "devDependencies": {
     "@types/node": "^24.0.0",
     "electron": "^43.4.0",
+    "electron-builder": "^26.15.3",
     "typescript": "^5.7.3"
   }
 }

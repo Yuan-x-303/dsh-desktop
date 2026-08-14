@@ -23,13 +23,18 @@ export interface DshLaunchResult {
   stop: () => void;
 }
 
+/** App root: the project directory in dev, or <resources>/app in a packaged (asar:false) build. */
+function appRoot(): string {
+  return join(__dirname, '..', '..');
+}
+
 /** Locate the @deepseek-ai/dsh CLI entry. */
 export function resolveDshBin(): string {
   try {
     return require.resolve('@deepseek-ai/dsh/lib/bin.js');
   } catch {
     const fromRoot = join(
-      process.cwd(),
+      appRoot(),
       'node_modules',
       '@deepseek-ai',
       'dsh',
@@ -43,9 +48,25 @@ export function resolveDshBin(): string {
   }
 }
 
-/** Node binary used to run dsh. In dev this is the system Node; override with DSH_DESKTOP_NODE. */
+/**
+ * Node binary used to run dsh. Prefers an explicit DSH_DESKTOP_NODE override,
+ * then the bundled portable runtime (resources/runtime/node.exe), then the
+ * system `node` on PATH.
+ */
 export function resolveNodeBin(): string {
-  return process.env.DSH_DESKTOP_NODE || 'node';
+  const explicit = process.env.DSH_DESKTOP_NODE?.trim();
+  if (explicit) return explicit;
+
+  const resourcesPath = (process as unknown as { resourcesPath?: string }).resourcesPath;
+  if (resourcesPath) {
+    const packaged = join(resourcesPath, 'runtime', 'node.exe');
+    if (existsSync(packaged)) return packaged;
+  }
+
+  const dev = join(appRoot(), 'resources', 'runtime', 'node.exe');
+  if (existsSync(dev)) return dev;
+
+  return 'node';
 }
 
 interface DesktopConfig {
