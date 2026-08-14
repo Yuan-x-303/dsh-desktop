@@ -1,7 +1,11 @@
 #!/usr/bin/env node
 // Generate build/icon.png (512px) and build/icon.ico (16/32/48/256) with pure
-// Node — no image libraries. The mark is a terminal ">" prompt with a cursor,
-// on a dark gradient rounded square.
+// Node — no image libraries.
+//
+// Design: a white "reasoning" spiral converging on a bright cyan insight point,
+// over a DeepSeek-blue deep-sea gradient rounded square. The inward spiral
+// evokes deep chain-of-thought / diving for the answer; the cyan point is the
+// insight at the bottom of the dive.
 //
 // Usage: node scripts/generate-icon.mjs
 import { deflateSync } from 'node:zlib';
@@ -60,12 +64,7 @@ function encodePng(width, height, rgba) {
   ]);
 }
 
-// ---- drawing (2x supersampled, then averaged down for anti-aliasing) ----
-function hexToRgb(hex) {
-  const n = parseInt(hex.slice(1), 16);
-  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
-}
-
+// ---- geometry (all in 512-space, scaled at draw time) ----
 function inRoundedRect(x, y, minx, miny, maxx, maxy, r) {
   const cx = Math.min(Math.max(x, minx + r), maxx - r);
   const cy = Math.min(Math.max(y, miny + r), maxy - r);
@@ -87,49 +86,95 @@ function segDist(px, py, ax, ay, bx, by) {
   return Math.sqrt(ex * ex + ey * ey);
 }
 
-function drawIcon(size) {
-  const SS = size * 2;
-  const hi = Buffer.alloc(SS * SS * 4);
-  const s = SS / 512;
-  const top = hexToRgb('#262c3d');
-  const bottom = hexToRgb('#10131a');
-  const white = [255, 255, 255];
-  const accent = hexToRgb('#4f8cff');
+// Archimedean spiral converging on (cx, cy). `alpha` fades from 1 (center) to
+// ~0.18 (outer end) so it reads as "diving inward toward the insight".
+function buildSpiral(cx, cy, r0, r1, turns) {
+  const segs = [];
+  const N = 200;
+  const thetaMax = turns * 2 * Math.PI;
+  for (let i = 0; i <= N; i++) {
+    const t = i / N;
+    const theta = t * thetaMax;
+    const r = r0 + (r1 - r0) * t;
+    segs.push({
+      x: cx + r * Math.cos(theta),
+      y: cy + r * Math.sin(theta),
+      alpha: 1 - 0.55 * t,
+    });
+  }
+  return segs;
+}
 
+const SPIRAL = buildSpiral(256, 256, 24, 188, 2.5);
+const STROKE_HALF = 10;
+
+function drawIcon(size) {
+  const SS = size * 2; // 2x supersample for anti-aliasing
+  const s = SS / 512;
+  const hi = Buffer.alloc(SS * SS * 4);
+  const top = [77, 107, 254]; // #4d6bfe DeepSeek blue
+  const bottom = [10, 18, 48]; // #0a1230 deep navy
+  const dot = [125, 211, 252]; // #7dd3fc insight cyan
   const radius = 96 * s;
-  const armA = { x: 152 * s, y: 152 * s };
-  const armB = { x: 318 * s, y: 256 * s };
-  const armC = { x: 152 * s, y: 360 * s };
-  const halfW = 22 * s;
-  const cursor = { minx: 372 * s, miny: 208 * s, maxx: 406 * s, maxy: 304 * s, r: 10 * s };
 
   for (let y = 0; y < SS; y++) {
     for (let x = 0; x < SS; x++) {
-      let r = 0;
-      let g = 0;
-      let b = 0;
-      let a = 0;
+      let r;
+      let g;
+      let b;
+      let a;
+
       if (inRoundedRect(x, y, 0, 0, SS, SS, radius)) {
         const t = y / SS;
         r = top[0] + (bottom[0] - top[0]) * t;
         g = top[1] + (bottom[1] - top[1]) * t;
         b = top[2] + (bottom[2] - top[2]) * t;
         a = 255;
+      } else {
+        r = 0;
+        g = 0;
+        b = 0;
+        a = 0;
       }
-      const d1 = segDist(x, y, armA.x, armA.y, armB.x, armB.y);
-      const d2 = segDist(x, y, armC.x, armC.y, armB.x, armB.y);
-      if (Math.min(d1, d2) <= halfW) {
-        r = white[0];
-        g = white[1];
-        b = white[2];
-        a = 255;
+
+      if (a > 0) {
+        const X = x / s;
+        const Y = y / s;
+
+        // reasoning spiral (white, fading outward)
+        let bestD = Infinity;
+        let bestA = 0;
+        for (let i = 0; i < SPIRAL.length - 1; i++) {
+          const p = SPIRAL[i];
+          const q = SPIRAL[i + 1];
+          const d = segDist(X, Y, p.x, p.y, q.x, q.y);
+          if (d < bestD) {
+            bestD = d;
+            bestA = (p.alpha + q.alpha) / 2;
+          }
+        }
+        if (bestD <= STROKE_HALF) {
+          const cov = 1 - bestD / STROKE_HALF;
+          const alpha = bestA * 255 * cov;
+          r += (255 - r) * (alpha / 255);
+          g += (255 - g) * (alpha / 255);
+          b += (255 - b) * (alpha / 255);
+        }
+
+        // insight point + soft glow at the spiral's center
+        const dc = Math.hypot(X - 256, Y - 256);
+        if (dc <= 12) {
+          r = dot[0];
+          g = dot[1];
+          b = dot[2];
+        } else if (dc <= 22) {
+          const glow = (1 - (dc - 12) / 10) * 0.55;
+          r += (dot[0] - r) * glow;
+          g += (dot[1] - g) * glow;
+          b += (dot[2] - b) * glow;
+        }
       }
-      if (inRoundedRect(x, y, cursor.minx, cursor.miny, cursor.maxx, cursor.maxy, cursor.r)) {
-        r = accent[0];
-        g = accent[1];
-        b = accent[2];
-        a = 255;
-      }
+
       const i = (y * SS + x) * 4;
       hi[i] = r;
       hi[i + 1] = g;
