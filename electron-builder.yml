@@ -1,6 +1,6 @@
 appId: com.dsh.desktop
 productName: DSH Desktop
-copyright: Copyright © 2026 DSH Desktop contributors
+copyright: Copyright © 2026 DSH_Yuan
 
 directories:
   output: release

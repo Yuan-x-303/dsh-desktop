@@ -3,7 +3,7 @@
   "version": "0.2.0",
   "private": true,
   "description": "One-click desktop launcher for DeepSeek Harness",
-  "author": "DHS_Yuan",
+  "author": "DSH_Yuan",
   "license": "MIT",
   "main": "dist/electron/main.js",
   "scripts": {
