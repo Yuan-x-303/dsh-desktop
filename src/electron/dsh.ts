@@ -13,12 +13,16 @@ export interface DshLaunchOptions {
   port?: number;
   /** Extra args forwarded to `dsh web`. */
   extraArgs?: string[];
+  /** Reject the url promise if dsh doesn't announce its URL within this many ms. */
+  timeoutMs?: number;
 }
 
 export interface DshLaunchResult {
   child: ChildProcess;
   /** Resolves with the announced URL once dsh prints it (e.g. http://127.0.0.1:3080). */
   url: Promise<string>;
+  /** Accumulated stdout/stderr lines, for diagnostics on failure. */
+  logs: string[];
   /** Kills the dsh child process. */
   stop: () => void;
 }
@@ -140,6 +144,8 @@ export function launchDsh(options: DshLaunchOptions = {}): DshLaunchResult {
     windowsHide: true,
   });
 
+  const logs: string[] = [];
+
   let resolveUrl!: (url: string) => void;
   let rejectUrl!: (err: Error) => void;
   const url = new Promise<string>((resolve, reject) => {
@@ -147,23 +153,55 @@ export function launchDsh(options: DshLaunchOptions = {}): DshLaunchResult {
     rejectUrl = reject;
   });
 
+  let timeout: NodeJS.Timeout | undefined;
+  let settled = false;
+  const clearTimer = () => {
+    if (timeout) {
+      clearTimeout(timeout);
+      timeout = undefined;
+    }
+  };
+  const resolveOnce = (u: string) => {
+    if (settled) return;
+    settled = true;
+    clearTimer();
+    resolveUrl(u);
+  };
+  const rejectOnce = (err: Error) => {
+    if (settled) return;
+    settled = true;
+    clearTimer();
+    rejectUrl(err);
+  };
+
+  if (options.timeoutMs && options.timeoutMs > 0) {
+    timeout = setTimeout(() => {
+      rejectOnce(
+        new Error(`dsh did not announce its URL within ${options.timeoutMs}ms`)
+      );
+    }, options.timeoutMs);
+  }
+
   const stdout = createInterface({ input: child.stdout! });
   stdout.on('line', (line) => {
+    logs.push(line);
     // Matches: "dsh web: http://127.0.0.1:3080" (with an optional " (LAN: ...)" suffix)
     const match = line.match(/dsh web:\s+(https?:\/\/\S+)/);
-    if (match) resolveUrl(match[1]);
+    if (match) resolveOnce(match[1]);
   });
 
   child.stderr!.on('data', (chunk: Buffer) => {
-    process.stderr.write(`[dsh] ${chunk.toString()}`);
+    const text = chunk.toString();
+    logs.push(text);
+    process.stderr.write(`[dsh] ${text}`);
   });
 
   child.on('error', (err) => {
-    rejectUrl(err);
+    rejectOnce(err);
   });
 
   child.on('exit', (code, signal) => {
-    rejectUrl(
+    rejectOnce(
       new Error(
         `dsh exited before announcing its URL (code=${code}, signal=${signal ?? 'none'})`
       )
@@ -173,6 +211,7 @@ export function launchDsh(options: DshLaunchOptions = {}): DshLaunchResult {
   return {
     child,
     url,
+    logs,
     stop: () => {
       try {
         if (!child.killed) child.kill();
