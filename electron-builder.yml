@@ -6,7 +6,7 @@ copyright: Copyright © 2026 DSH_Yuan
 # Replace owner/repo with your real GitHub repo before publishing.
 publish:
   provider: github
-  owner: YOUR_GITHUB_USERNAME
+  owner: Yuan-x-303
   repo: dsh-desktop
 
 directories:
