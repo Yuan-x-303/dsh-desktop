@@ -139,7 +139,18 @@ export function launchDsh(options: DshLaunchOptions = {}): DshLaunchResult {
   const dshBin = resolveDshBin();
   const nodeBin = resolveNodeBin();
   const port = options.port ?? 0;
-  const args = [dshBin, 'web', '--port', String(port), ...(options.extraArgs ?? [])];
+  // Force the loopback bind: dsh web itself refuses `--host 0.0.0.0`, but a
+  // user profile patch could still bind all interfaces and expose the
+  // remote-code-execution-capable server to the LAN. The CLI flag overrides it.
+  const args = [
+    dshBin,
+    'web',
+    '--host',
+    '127.0.0.1',
+    '--port',
+    String(port),
+    ...(options.extraArgs ?? []),
+  ];
 
   const workspace = resolveWorkspace(options);
   const home = resolveHome(options);
@@ -222,8 +233,20 @@ export function launchDsh(options: DshLaunchOptions = {}): DshLaunchResult {
     url,
     logs,
     stop: () => {
+      const pid = child.pid;
+      if (pid === undefined || child.killed) return;
       try {
-        if (!child.killed) child.kill();
+        if (process.platform === 'win32') {
+          // child.kill() on Windows is TerminateProcess on the direct child
+          // only; taskkill /T also reaps grandchildren (tool subprocesses)
+          // that would otherwise be orphaned when the app quits.
+          spawn('taskkill', ['/pid', String(pid), '/T', '/F'], {
+            windowsHide: true,
+            stdio: 'ignore',
+          });
+        } else {
+          child.kill();
+        }
       } catch {
         /* already gone */
       }

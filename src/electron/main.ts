@@ -1,13 +1,23 @@
-import { app, BrowserWindow } from 'electron';
+import { join } from 'node:path';
+import { app, BrowserWindow, shell } from 'electron';
 import { launchDsh } from './dsh';
 
 // Windows: a stable AppUserModelID groups taskbar icons and enables notifications.
 app.setAppUserModelId('com.dsh.desktop');
 
+// The packaged build keeps package.json name "dsh-desktop", so packaged and
+// dev would share the same userData — and the same single-instance lock. Give
+// dev its own profile dir so `npm start` can run while the installed app is
+// open. Must happen before requestSingleInstanceLock.
+if (!app.isPackaged) {
+  app.setPath('userData', join(app.getPath('temp'), 'dsh-desktop-dev'));
+}
+
 let mainWindow: BrowserWindow | null = null;
 let stopDsh: (() => void) | null = null;
 let quitting = false;
 let appLoaded = false;
+let harnessOrigin: string | null = null;
 
 const STARTUP_TIMEOUT_MS = 120_000;
 
@@ -50,6 +60,28 @@ function createWindow(): BrowserWindow {
   // looks like a hang; navigate to the real URL once dsh announces it.
   win.loadURL(dataUrl(LOADING_HTML));
 
+  // Keep the app window on the Harness UI. Page-initiated navigations away
+  // from the harness origin (external links) are handed to the system browser.
+  win.webContents.on('will-navigate', (event, targetUrl) => {
+    const origin = harnessOrigin;
+    if (origin === null) return; // still on the loading page
+    try {
+      if (new URL(targetUrl).origin !== origin) {
+        event.preventDefault();
+        if (/^https?:/i.test(targetUrl)) void shell.openExternal(targetUrl);
+      }
+    } catch {
+      event.preventDefault();
+    }
+  });
+
+  // target=_blank / window.open: open in the default browser, never a second
+  // app window that would lose the harness session.
+  win.webContents.setWindowOpenHandler(({ url: targetUrl }) => {
+    if (/^https?:/i.test(targetUrl)) void shell.openExternal(targetUrl);
+    return { action: 'deny' };
+  });
+
   win.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {
     if (errorCode === -3) return; // ERR_ABORTED — ignore
     console.error('[dsh-desktop] page failed to load:', errorDescription, validatedURL);
@@ -83,6 +115,7 @@ function startDsh(): void {
   url
     .then((u) => {
       appLoaded = true;
+      harnessOrigin = new URL(u).origin;
       mainWindow?.loadURL(u);
     })
     .catch((err: Error) => {
@@ -120,8 +153,8 @@ const LOADING_HTML = `<!doctype html>
 <body>
   <div class="wrap">
     <div class="spinner"></div>
-    <div class="title">正在启动 DeepSeek Harness…</div>
-    <div class="sub">首次启动可能需要几十秒，请稍候</div>
+    <div class="title">Starting DeepSeek Harness&hellip;</div>
+    <div class="sub">First launch may take up to a minute &mdash; please wait</div>
   </div>
 </body></html>`;
 
@@ -143,11 +176,11 @@ function errorHtml(message: string, logs: string[]): string {
   .hint{font-size:12px;color:#5b6478;margin-top:16px}
 </style></head>
 <body>
-  <div class="badge">启动失败</div>
-  <h1>DeepSeek Harness 未能启动</h1>
+  <div class="badge">STARTUP FAILED</div>
+  <h1>DeepSeek Harness could not start</h1>
   <div class="msg">${escapeHtml(message)}</div>
-  <pre>${escapeHtml(logText || '(没有捕获到输出)')}</pre>
-  <div class="hint">请关闭此窗口后重试；若持续失败，请把上面的日志反馈给开发者。</div>
+  <pre>${escapeHtml(logText || '(no output captured)')}</pre>
+  <div class="hint">Close this window and try again. If the problem persists, share the log above with the developers.</div>
 </body></html>`;
 }
 
