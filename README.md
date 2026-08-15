@@ -2,12 +2,16 @@
 
 One-click desktop launcher for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness). It starts the Harness Web UI in a native window with **zero setup** — the end user does not need Node.js or anything else installed.
 
-- **Zero dependency**: a portable Node.js runtime is bundled, so `dsh web` runs out of the box.
+- **Zero dependency**: the Harness host runs on **Electron's own Node runtime**
+  (`ELECTRON_RUN_AS_NODE`), so `dsh web` runs out of the box — no portable Node,
+  no system Node, nothing else installed.
 - **Portable & installable**: ship a single `.exe` (portable) or a per-user installer (NSIS).
 - **Auto port**: passes `--port 0` and parses the real URL from stdout — no port clashes.
 - **Loopback only**: forces `--host 127.0.0.1`, so the Harness server is never exposed to the LAN.
 - **Single instance**: launching again focuses the existing window.
 - **Clean lifecycle**: closing the window stops `dsh` and its child processes; if `dsh` crashes, the app closes.
+- **Hardened renderer**: the window denies all browser permission requests
+  (camera, geolocation, MIDI, …) and only allows the harness origin to navigate.
 - **Friendly startup**: a loading screen is shown while `dsh` boots; failures show the captured log.
 
 ## Install
@@ -31,11 +35,12 @@ npm start          # compiles TS and launches Electron
 ## Build the installer
 
 ```bash
-npm run dist       # fetch Node runtime + compile + electron-builder --win
+npm run dist       # compile + electron-builder --win
 ```
 
-Artifacts land in `release/`. The first build downloads the portable Node runtime
-(once, cached in `resources/runtime/node.exe`) and electron-builder's NSIS tooling.
+Artifacts land in `release/`. The first build downloads electron-builder's NSIS
+tooling (once). No portable Node is fetched: the host runs on the Node runtime
+inside Electron itself (`ELECTRON_RUN_AS_NODE=1`).
 
 > `npm run dist` refuses to run while DSH Desktop is running from
 > `release\win-unpacked` (the build clears that directory, and a running app
@@ -74,7 +79,7 @@ Environment variables:
 | ------------------ | ----------------------------------------- | ------------------ |
 | `DSH_WORKSPACE`    | workspace root (`config.json` wins)        | `~/dsh-workspace`  |
 | `DSH_HOME`         | Harness data dir (`config.json` wins)      | `~/.dsh`           |
-| `DSH_DESKTOP_NODE` | node executable used to run `dsh`          | bundled runtime    |
+| `DSH_DESKTOP_NODE` | override node executable used to run `dsh` | Electron's Node    |
 
 ## Interop with the official DeepSeek Harness (session data location)
 
@@ -120,30 +125,75 @@ Version pinning: this app bundles a specific `@deepseek-ai/dsh` (see
 ships a newer session format, this app refuses to open those sessions until the
 bundled harness is upgraded (see [Upgrading](#upgrading-deepseek-harness)).
 
+## Managing plugins
+
+The app runs the standard `web` profile, and plugins are installed into that
+profile inside the shared data dir — the same place every other `dsh` entry
+point reads. With the default `home` (`~/.dsh`):
+
+```
+~/.dsh/profiles/web/
+├── package.json         ← plugin dependencies live here
+├── cordis.patch.yml     ← your own plugin config layer
+└── node_modules/        ← where pnpm puts installed plugins
+```
+
+Anything you install here is picked up by **this app, the official CLI, or any
+other dsh instance that points at the same `home`** — no extra steps needed.
+
+To install a plugin you need **Node.js and pnpm on your PATH** (the app itself
+does not bundle them). From a terminal:
+
+```bash
+# pnpm itself is not bundled — install it once (requires Node.js):
+corepack enable pnpm          # or: npm install -g pnpm
+
+# Point dsh at the same home the app uses, then manage the web profile:
+dsh plugin --profile web add <plugin-package>
+dsh plugin --profile web remove <plugin-package>
+dsh plugin --profile web list
+```
+
+Notes:
+
+- `dsh plugin` is a thin forwarder: it runs `pnpm <args>` inside the profile
+  directory and reconciles the profile manifest afterwards. If your `home` is
+  not the default, export it first, e.g. `DSH_HOME=C:\path\.dsh`.
+- The first boot of the app created the profile for you; if it doesn't exist
+  yet, run `dsh web` once (or just launch the app) before managing plugins.
+- Plugin **config** (as opposed to installation) goes into the profile's
+  `cordis.patch.yml` (or `$DSH_HOME/cordis.patch.yml` for home-wide patches).
+
 ## How it works
 
 ```
 start.bat (dev only)
    └─ electron .            main process
-        ├─ spawn <node> dsh web --host 127.0.0.1 --port 0   (bundled Node in packaged builds)
-        ├─ parse stdout: "dsh web: http://127.0.0.1:PORT"
+        ├─ spawn Electron-as-Node: <electron> --expose-internals dsh web --host 127.0.0.1 --port 0
+        │   (ELECTRON_RUN_AS_NODE=1 → the Electron binary acts as plain Node;
+        │    --expose-internals is required by dsh's bundled HMR plugin)
+        ├─ parse stdout: "dsh web: http://127.0.0.1:PORT" (strict loopback/port validation)
         ├─ show a loading screen while dsh boots
-        └─ open BrowserWindow at that URL (external links go to the system browser)
+        └─ open BrowserWindow at that URL (+ ?dsh-desktop-platform=win32)
+            - external links go to the system browser
+            - all browser permission requests are denied
 ```
 
-`node_modules` is shipped unpacked (`asar: false`) so the bundled Node can read
-`@deepseek-ai/dsh` as plain files. Native modules are not rebuilt for Electron
-because `dsh` runs under the bundled Node, not inside Electron.
+`node_modules` is shipped unpacked (`asar: false`) so the Electron-as-Node
+runtime can read `@deepseek-ai/dsh` as plain files. Native modules are not
+rebuilt for Electron because `dsh` runs under the Node runtime inside Electron
+(`ELECTRON_RUN_AS_NODE=1`), not inside the renderer.
 
 ## Project structure
 
 ```
-src/electron/main.ts        window + lifecycle + navigation guard
-src/electron/dsh.ts         spawn dsh + resolve bundled Node / dsh bin
-scripts/fetch-node.mjs      download portable Node runtime
+src/electron/main.ts        window + lifecycle + navigation guard + permission hardening
+src/electron/dsh.ts         spawn dsh (Electron-as-Node) + strict readiness parser
+scripts/fetch-node.mjs      optional: download a portable Node (fallback, not used in dist)
 scripts/generate-icon.mjs   regenerate the default build/icon.png & build/icon.ico
 scripts/import-icon.mjs     import a custom icon from build/icon-source.jpg
 scripts/guard-dist.mjs      predist guard: refuse to package while the app is running
+build/installer.nsh         NSIS include: recreate shortcuts with the fresh exe icon
 electron-builder.yml        packaging config (NSIS + portable)
 config.example.json         configuration template
 ```
@@ -154,6 +204,10 @@ config.example.json         configuration template
   yet; click **More info → Run anyway**.
 - **First launch is slow** — the first boot installs the profile's plugins under
   `$DSH_HOME/profiles`; subsequent launches are fast.
+- **"pnpm not found on PATH" when installing plugins** — the app bundles no
+  pnpm/Node for plugin management by design; install Node.js and run
+  `corepack enable pnpm` (or `npm install -g pnpm`), then retry — see
+  [Managing plugins](#managing-plugins).
 - **Where is my data?** — sessions/settings live under the configured `home`
   (default `~/.dsh`), workspace files under `workspace` (default `~/dsh-workspace`).
   This is outside the install folder: uninstalling or reinstalling the app does
@@ -170,6 +224,15 @@ config.example.json         configuration template
   corrupt a session. Close one before opening the other.
 - **`npm run dist` refuses to run** — DSH Desktop is still running from
   `release\win-unpacked`; close it first (see the Build section).
+- **After upgrading, the Start Menu/desktop shortcut shows a stale icon**
+  (different from the exe in the install folder) — electron-builder's upgrade
+  path renames the old `.lnk` instead of recreating it, and Windows also caches
+  icons. Since v0.2.1 the installer (`build/installer.nsh`) recreates both
+  shortcuts on every install with the freshly installed exe's icon. If you still
+  see a stale icon, it is the Windows icon cache: right-click the desktop →
+  **Refresh**, or restart Explorer (Task Manager → Windows Explorer → Restart),
+  or clear the cache with `ie4uinit.exe -show`. A fresh install is never
+  affected — only a pre-existing install that was upgraded.
 
 ## Upgrading DeepSeek Harness
 
@@ -252,8 +315,9 @@ downloaded update just as it does the initial installer.
 
 ## Contributing
 
-PRs welcome. Regenerate assets with `npm run icon` and `npm run fetch:node` as
-needed; do not commit `release/` or `resources/runtime/`.
+PRs welcome. Regenerate assets with `npm run icon` as needed; do not commit
+`release/` or `resources/runtime/` (the latter only holds the optional portable
+Node fallback).
 
 ## License
 

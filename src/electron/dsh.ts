@@ -2,7 +2,6 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { homedir } from 'node:os';
 import { mkdirSync, existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { createInterface } from 'node:readline';
 
 export interface DshLaunchOptions {
   /** Workspace root handed to DeepSeek Harness. Defaults to ~/dsh-workspace. */
@@ -53,24 +52,38 @@ export function resolveDshBin(): string {
 }
 
 /**
- * Node binary used to run dsh. Prefers an explicit DSH_DESKTOP_NODE override,
- * then the bundled portable runtime (resources/runtime/node.exe), then the
- * system `node` on PATH.
+ * Node executable used to run `dsh`.
+ *
+ * Priority:
+ *   1. An explicit `DSH_DESKTOP_NODE` override (any Node ≥ 20).
+ *   2. Running inside Electron → the Electron binary itself in
+ *      ELECTRON_RUN_AS_NODE mode. This is what the official desktop app does:
+ *      no separate portable Node runtime is shipped, the harness host runs on
+ *      the exact Node that ships inside Electron (v24 here).
+ *   3. A bundled portable runtime at resources/runtime/node.exe (dev only,
+ *      kept as a fallback).
+ *   4. The system `node` on PATH (dev only).
  */
-export function resolveNodeBin(): string {
+export function resolveNodeBin(): { bin: string; electronRunAsNode: boolean } {
   const explicit = process.env.DSH_DESKTOP_NODE?.trim();
-  if (explicit) return explicit;
+  if (explicit) return { bin: explicit, electronRunAsNode: false };
+
+  // We only ever run inside Electron (main.ts), but be defensive: if the
+  // Electron marker is present, use the Electron binary as the Node runtime.
+  if (process.versions.electron) {
+    return { bin: process.execPath, electronRunAsNode: true };
+  }
 
   const resourcesPath = (process as unknown as { resourcesPath?: string }).resourcesPath;
   if (resourcesPath) {
     const packaged = join(resourcesPath, 'runtime', 'node.exe');
-    if (existsSync(packaged)) return packaged;
+    if (existsSync(packaged)) return { bin: packaged, electronRunAsNode: false };
   }
 
   const dev = join(appRoot(), 'resources', 'runtime', 'node.exe');
-  if (existsSync(dev)) return dev;
+  if (existsSync(dev)) return { bin: dev, electronRunAsNode: false };
 
-  return 'node';
+  return { bin: 'node', electronRunAsNode: false };
 }
 
 interface DesktopConfig {
@@ -156,14 +169,90 @@ function ensureDir(dir: string, what: string): void {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Readiness-line parsing (mirrors the official desktop app's strict parser).
+//
+// `dsh web` prints a single readiness line of the form:
+//     dsh web: http://127.0.0.1:PORT
+// We buffer stdout by chunks (a line can straddle chunk boundaries), require
+// the URL to be loopback HTTP with an explicit integer port and nothing else,
+// and reject conflicting readiness URLs.
+// ---------------------------------------------------------------------------
+
+const READINESS_PREFIX = 'dsh web: ';
+const DEFAULT_READINESS_TIMEOUT_MS = 90_000;
+
+/** Assert and normalize one readiness line; undefined if it is not one. */
+function parseReadinessLine(line: string): string | undefined {
+  if (!line.startsWith(READINESS_PREFIX)) return undefined;
+  const token = line.slice(READINESS_PREFIX.length).split(/\s/u, 1)[0];
+  if (token === undefined) {
+    throw new Error(`dsh readiness line has no URL: ${line}`);
+  }
+  let url: URL;
+  try {
+    url = new URL(token);
+  } catch {
+    throw new Error(`dsh readiness URL is invalid: ${token}`);
+  }
+  const port = Number(url.port);
+  const isLoopback = url.hostname === '127.0.0.1' || url.hostname === 'localhost';
+  const isBareHttp =
+    url.protocol === 'http:' &&
+    url.pathname === '/' &&
+    url.search === '' &&
+    url.hash === '' &&
+    Number.isInteger(port) &&
+    port >= 1 &&
+    port <= 65535;
+  if (!isLoopback || !isBareHttp) {
+    throw new Error(
+      `dsh readiness URL must be loopback HTTP with an explicit port: ${token}`
+    );
+  }
+  return url.origin;
+}
+
+/** Incremental chunk-based parser that is stable once readiness is reached. */
+function createReadinessParser(): { push(chunk: string): string | undefined } {
+  let pending = '';
+  let readyUrl: string | undefined;
+  const accept = (line: string): string | undefined => {
+    const parsed = parseReadinessLine(line.replace(/\r$/u, ''));
+    if (parsed === undefined) return undefined;
+    if (readyUrl !== undefined && parsed !== readyUrl) {
+      throw new Error(
+        `dsh emitted conflicting readiness URLs: ${readyUrl} and ${parsed}`
+      );
+    }
+    readyUrl = parsed;
+    return readyUrl;
+  };
+  return {
+    push(chunk: string): string | undefined {
+      pending += chunk;
+      for (;;) {
+        const newline = pending.indexOf('\n');
+        if (newline === -1) return readyUrl;
+        const line = pending.slice(0, newline);
+        pending = pending.slice(newline + 1);
+        const parsed = accept(line);
+        if (parsed !== undefined) return parsed;
+      }
+    },
+  };
+}
+
 export function launchDsh(options: DshLaunchOptions = {}): DshLaunchResult {
   const dshBin = resolveDshBin();
-  const nodeBin = resolveNodeBin();
+  const { bin: nodeBin, electronRunAsNode } = resolveNodeBin();
   const port = options.port ?? 0;
   // Force the loopback bind: dsh web itself refuses `--host 0.0.0.0`, but a
   // user profile patch could still bind all interfaces and expose the
   // remote-code-execution-capable server to the LAN. The CLI flag overrides it.
   const args = [
+    // --expose-internals is required by the HMR plugin bundled with dsh.
+    ...(electronRunAsNode ? ['--expose-internals'] : []),
     dshBin,
     'web',
     '--host',
@@ -179,7 +268,16 @@ export function launchDsh(options: DshLaunchOptions = {}): DshLaunchResult {
 
   const child = spawn(nodeBin, args, {
     cwd: workspace,
-    env: { ...process.env, DSH_HOME: home },
+    env: {
+      ...process.env,
+      DSH_HOME: home,
+      // When running on the Electron binary, switch it into plain Node mode.
+      // Harmless when nodeBin is a real Node (the env var is ignored).
+      ELECTRON_RUN_AS_NODE: electronRunAsNode ? '1' : '',
+      // Lets the harness know it is hosted by the desktop app (mirrors the
+      // official desktop build) so the web UI can adapt (e.g. native pickers).
+      DSH_DESKTOP: '1',
+    },
     stdio: ['ignore', 'pipe', 'pipe'],
     windowsHide: true,
   });
@@ -214,20 +312,30 @@ export function launchDsh(options: DshLaunchOptions = {}): DshLaunchResult {
     rejectUrl(err);
   };
 
-  if (options.timeoutMs && options.timeoutMs > 0) {
-    timeout = setTimeout(() => {
-      rejectOnce(
-        new Error(`dsh did not announce its URL within ${options.timeoutMs}ms`)
-      );
-    }, options.timeoutMs);
-  }
+  const timeoutMs = options.timeoutMs ?? DEFAULT_READINESS_TIMEOUT_MS;
+  timeout = setTimeout(() => {
+    rejectOnce(new Error(`dsh did not announce its URL within ${timeoutMs}ms`));
+  }, timeoutMs);
 
-  const stdout = createInterface({ input: child.stdout! });
-  stdout.on('line', (line) => {
-    logs.push(line);
-    // Matches: "dsh web: http://127.0.0.1:3080" (with an optional " (LAN: ...)" suffix)
-    const match = line.match(/dsh web:\s+(https?:\/\/\S+)/);
-    if (match) resolveOnce(match[1]);
+  const parser = createReadinessParser();
+  child.stdout!.on('data', (chunk: Buffer) => {
+    const text = chunk.toString();
+    logs.push(text);
+    process.stdout.write(`[dsh] ${text}`);
+    if (settled) return;
+    try {
+      const announced = parser.push(text);
+      if (announced !== undefined) resolveOnce(announced);
+    } catch (err) {
+      rejectOnce(err instanceof Error ? err : new Error(String(err)));
+      if (child.pid !== undefined) {
+        try {
+          child.kill();
+        } catch {
+          /* already gone */
+        }
+      }
+    }
   });
 
   child.stderr!.on('data', (chunk: Buffer) => {

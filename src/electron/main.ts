@@ -1,5 +1,5 @@
 import { join } from 'node:path';
-import { app, BrowserWindow, dialog, shell } from 'electron';
+import { app, BrowserWindow, dialog, session, shell } from 'electron';
 import { autoUpdater } from 'electron-updater';
 import { launchDsh, resolveLaunchPaths, type DshLaunchResult } from './dsh';
 
@@ -95,6 +95,15 @@ function createWindow(): BrowserWindow {
     console.error('[dsh-desktop] page failed to load:', errorDescription, validatedURL);
   });
 
+  // The web UI can request browser permissions (camera, geolocation, MIDI, ...).
+  // This shell serves a local agent host with arbitrary command execution; no
+  // renderer-side permission should ever be granted. Deny everything up front
+  // (mirrors the official desktop build).
+  win.webContents.session.setPermissionCheckHandler(() => false);
+  win.webContents.session.setPermissionRequestHandler((_wc, _permission, callback) => {
+    callback(false);
+  });
+
   win.on('closed', () => {
     mainWindow = null;
   });
@@ -132,8 +141,13 @@ function startDsh(): void {
   url
     .then((u) => {
       appLoaded = true;
-      harnessOrigin = new URL(u).origin;
-      mainWindow?.loadURL(u);
+      const target = new URL(u);
+      harnessOrigin = target.origin;
+      // Tell the web UI which platform is hosting it (mirrors the official
+      // desktop build, which passes ?dsh-desktop-platform=win32 so the UI can
+      // pick native directory pickers / title bar behavior).
+      target.searchParams.set('dsh-desktop-platform', process.platform);
+      mainWindow?.loadURL(target.toString());
     })
     .catch((err: Error) => {
       if (quitting) return;
