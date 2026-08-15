@@ -1,7 +1,7 @@
 import { join } from 'node:path';
 import { app, BrowserWindow, dialog, shell } from 'electron';
 import { autoUpdater } from 'electron-updater';
-import { launchDsh, type DshLaunchResult } from './dsh';
+import { launchDsh, resolveLaunchPaths, type DshLaunchResult } from './dsh';
 
 // Windows: a stable AppUserModelID groups taskbar icons and enables notifications.
 app.setAppUserModelId('com.dsh.desktop');
@@ -59,8 +59,10 @@ function createWindow(): BrowserWindow {
   win.setMenuBarVisibility(false);
 
   // Show a loading screen immediately so the (potentially slow) dsh boot never
-  // looks like a hang; navigate to the real URL once dsh announces it.
-  win.loadURL(dataUrl(LOADING_HTML));
+  // looks like a hang; navigate to the real URL once dsh announces it. The
+  // resolved workspace/home are shown so users can see where their data lives.
+  const { workspace, home } = resolveLaunchPaths();
+  win.loadURL(dataUrl(loadingHtml(workspace, home)));
 
   // Keep the app window on the Harness UI. Page-initiated navigations away
   // from the harness origin (external links) are handed to the system browser.
@@ -180,7 +182,8 @@ function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-const LOADING_HTML = `<!doctype html>
+function loadingHtml(workspace: string, home: string): string {
+  return `<!doctype html>
 <html><head><meta charset="utf-8">
 <style>
   html,body{height:100%;margin:0}
@@ -192,14 +195,18 @@ const LOADING_HTML = `<!doctype html>
   @keyframes spin{to{transform:rotate(360deg)}}
   .title{font-size:15px;color:#c7cde0}
   .sub{font-size:12px;margin-top:8px;color:#5b6478}
+  .paths{margin-top:22px;font-size:11px;color:#4a5266;line-height:1.8;
+       font-family:Consolas,"Courier New",monospace;word-break:break-all}
 </style></head>
 <body>
   <div class="wrap">
     <div class="spinner"></div>
     <div class="title">Starting DeepSeek Harness&hellip;</div>
     <div class="sub">First launch may take up to a minute &mdash; please wait</div>
+    <div class="paths">workspace: ${escapeHtml(workspace)}<br>home: ${escapeHtml(home)}</div>
   </div>
 </body></html>`;
+}
 
 function errorHtml(message: string, logs: string[]): string {
   const logText = logs.slice(-150).join('\n').trim();

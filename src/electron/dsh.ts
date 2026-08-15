@@ -135,6 +135,17 @@ function resolveHome(options: DshLaunchOptions): string {
   return join(homedir(), '.dsh');
 }
 
+/**
+ * Resolve the effective workspace and home (config → env → default) without
+ * launching. The loading screen shows these so users always know where their
+ * data (sessions/settings) lives.
+ */
+export function resolveLaunchPaths(
+  options: DshLaunchOptions = {}
+): { workspace: string; home: string } {
+  return { workspace: resolveWorkspace(options), home: resolveHome(options) };
+}
+
 /** Create a directory, or throw a clear error naming the setting and path. */
 function ensureDir(dir: string, what: string): void {
   try {
@@ -162,8 +173,7 @@ export function launchDsh(options: DshLaunchOptions = {}): DshLaunchResult {
     ...(options.extraArgs ?? []),
   ];
 
-  const workspace = resolveWorkspace(options);
-  const home = resolveHome(options);
+  const { workspace, home } = resolveLaunchPaths(options);
   ensureDir(workspace, 'workspace');
   ensureDir(home, 'home');
 

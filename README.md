@@ -76,6 +76,50 @@ Environment variables:
 | `DSH_HOME`         | Harness data dir (`config.json` wins)      | `~/.dsh`           |
 | `DSH_DESKTOP_NODE` | node executable used to run `dsh`          | bundled runtime    |
 
+## Interop with the official DeepSeek Harness (session data location)
+
+Sessions are plain files under the configured `home`:
+
+```
+<home>\sessions\<workspace-key>\session-<id>\session.jsonl.zstd
+```
+
+Any `dsh` instance — this app's bundled one or the official `dsh web` CLI —
+that points at the **same `home`** reads the same files. By default everything
+already lines up:
+
+- This app defaults to `home = ~/.dsh` and `workspace = ~/dsh-workspace` —
+  identical to the official CLI's defaults. So **out of the box, sessions
+  created here and in the official web UI are the same files** and interoperate
+  (settings and API keys in `home` are shared too).
+- The sidebar groups sessions by workspace; different workspaces in the same
+  home are all listed (each as its own group). New sessions land in the current
+  workspace.
+- The workspace registry (`<home>\storages\workspace.json`) is rebuilt from the
+  sessions folder **on startup**, so sessions created by another instance appear
+  after a restart — there is no live cross-process sync.
+
+Two things break the shared view, and both are the usual cause of "my sessions
+disappeared":
+
+1. **A different `home`**: if you create `%APPDATA%\dsh-desktop\config.json`
+   (or set `DSH_HOME`) for this app but launch the official CLI without the
+   same setting, each entry point reads a different folder. To share, launch
+   the official CLI with the same home/workspace, e.g. in PowerShell:
+   ```powershell
+   $env:DSH_HOME='E:\somewhere\.dsh'; $env:DSH_WORKSPACE='E:\somewhere\workspace'; dsh web
+   ```
+2. **Running both at the same time**: each instance appends to the same session
+   log file (zstd frames) with **no cross-process lock**. Two instances writing
+   one home concurrently can tear or corrupt a session log. Use one entry point
+   at a time (the ports never clash — this app uses a random port, the official
+   CLI uses 3080).
+
+Version pinning: this app bundles a specific `@deepseek-ai/dsh` (see
+`package.json`). Session logs carry a format version; if the official harness
+ships a newer session format, this app refuses to open those sessions until the
+bundled harness is upgraded (see [Upgrading](#upgrading-deepseek-harness)).
+
 ## How it works
 
 ```
@@ -111,6 +155,18 @@ config.example.json         configuration template
   `$DSH_HOME/profiles`; subsequent launches are fast.
 - **Where is my data?** — sessions/settings live under the configured `home`
   (default `~/.dsh`), workspace files under `workspace` (default `~/dsh-workspace`).
+  This is outside the install folder: uninstalling or reinstalling the app does
+  **not** remove your data. To keep sessions across machines (or after a
+  reinstall of Windows), back up `~/.dsh` and `~/dsh-workspace`.
+- **My yesterday's sessions are gone** — the session files are never deleted;
+  the app is probably reading a different `home` than before. Check
+  `%APPDATA%\dsh-desktop\config.json`: if it sets a `home`, the app reads only
+  that home's sessions. Sessions written while no config existed live under the
+  default `~/.dsh`. Point `home` back (or copy the session folders) to see them
+  again — see [Interop with the official DeepSeek Harness](#interop-with-the-official-deepseek-harness-session-data-location).
+- **Don't run this app and an official `dsh web` at the same time** — both
+  append to the same session log files without a lock; concurrent use can
+  corrupt a session. Close one before opening the other.
 - **`npm run dist` refuses to run** — DSH Desktop is still running from
   `release\win-unpacked`; close it first (see the Build section).
 
@@ -138,6 +194,12 @@ Harness version ships, bump it by hand:
 > The explicit `@deepseek-ai/*` entries in `package.json`'s `dependencies`
 > exist **because** of step 4 — they are the peer dependencies the launcher must
 > declare so electron-builder includes them. Keep them when upgrading.
+
+> **Session format compatibility**: session logs carry a format version. If a
+> newer upstream Harness bumps that version, older builds refuse to open the
+> new logs (and vice versa). Upgrade the bundle before it falls behind — an
+> installed app whose bundled Harness is old will show your newer sessions as
+> unreadable, not as deleted.
 
 ## Auto-update
 
