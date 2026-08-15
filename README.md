@@ -141,7 +141,8 @@ because `dsh` runs under the bundled Node, not inside Electron.
 src/electron/main.ts        window + lifecycle + navigation guard
 src/electron/dsh.ts         spawn dsh + resolve bundled Node / dsh bin
 scripts/fetch-node.mjs      download portable Node runtime
-scripts/generate-icon.mjs   regenerate build/icon.png & build/icon.ico
+scripts/generate-icon.mjs   regenerate the default build/icon.png & build/icon.ico
+scripts/import-icon.mjs     import a custom icon from build/icon-source.jpg
 scripts/guard-dist.mjs      predist guard: refuse to package while the app is running
 electron-builder.yml        packaging config (NSIS + portable)
 config.example.json         configuration template
@@ -200,6 +201,33 @@ Harness version ships, bump it by hand:
 > new logs (and vice versa). Upgrade the bundle before it falls behind — an
 > installed app whose bundled Harness is old will show your newer sessions as
 > unreadable, not as deleted.
+
+## Custom app icon
+
+The app icon is `build/icon.ico` (Windows exe/taskbar) and `build/icon.png`
+(512px, used as the base by the icon pipeline). Two ways to change it:
+
+1. **From an image file** (recommended): drop a picture with a plain near-white
+   background (e.g. a JPEG of your mascot on white) at `build/icon-source.jpg`,
+   then run:
+
+   ```sh
+   npm run icon:import          # uses build/icon-source.jpg by default
+   npm run icon:import path\to\my.png   # or point at any file
+   ```
+
+   The script flood-fills the near-white background from the image edges
+   (keeping white areas *inside* the subject), feathers the boundary, removes
+   the white halo, and writes a fresh `build/icon.png` + `build/icon.ico` plus a
+   checkered `icon-preview.png` at the repo root so you can eyeball the cutout.
+   The source file stays untouched.
+
+2. **From scratch**: `npm run icon` regenerates the default terminal-prompt
+   icon (this overwrites any custom icon — run it only if you want the default
+   back).
+
+Then rebuild the installer (`npm run dist`) — the exe and shortcuts pick up the
+new icon automatically.
 
 ## Auto-update
 

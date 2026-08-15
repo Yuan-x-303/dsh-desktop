@@ -49,6 +49,10 @@ function createWindow(): BrowserWindow {
     title: 'DeepSeek Harness',
     autoHideMenuBar: true,
     backgroundColor: '#0f1115',
+    // Dev runs from source: point the window at build/icon.png so `npm start`
+    // shows the custom icon too. The packaged exe carries its own .ico and does
+    // not need an icon option (build/ isn't shipped inside the app).
+    icon: app.isPackaged ? undefined : join(app.getAppPath(), 'build', 'icon.png'),
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,

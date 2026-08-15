@@ -6,3 +6,7 @@ release/
 resources/runtime/
 *.log
 config.json
+
+# Local icon workflow artifacts
+icon-preview.png
+build/backup-original-icon/
