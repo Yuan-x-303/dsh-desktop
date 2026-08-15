@@ -52,38 +52,24 @@ export function resolveDshBin(): string {
 }
 
 /**
- * Node executable used to run `dsh`.
- *
- * Priority:
- *   1. An explicit `DSH_DESKTOP_NODE` override (any Node ≥ 20).
- *   2. Running inside Electron → the Electron binary itself in
- *      ELECTRON_RUN_AS_NODE mode. This is what the official desktop app does:
- *      no separate portable Node runtime is shipped, the harness host runs on
- *      the exact Node that ships inside Electron (v24 here).
- *   3. A bundled portable runtime at resources/runtime/node.exe (dev only,
- *      kept as a fallback).
- *   4. The system `node` on PATH (dev only).
+ * Node binary used to run dsh. Prefers an explicit DSH_DESKTOP_NODE override,
+ * then the bundled portable runtime (resources/runtime/node.exe), then the
+ * system `node` on PATH.
  */
-export function resolveNodeBin(): { bin: string; electronRunAsNode: boolean } {
+export function resolveNodeBin(): string {
   const explicit = process.env.DSH_DESKTOP_NODE?.trim();
-  if (explicit) return { bin: explicit, electronRunAsNode: false };
-
-  // We only ever run inside Electron (main.ts), but be defensive: if the
-  // Electron marker is present, use the Electron binary as the Node runtime.
-  if (process.versions.electron) {
-    return { bin: process.execPath, electronRunAsNode: true };
-  }
+  if (explicit) return explicit;
 
   const resourcesPath = (process as unknown as { resourcesPath?: string }).resourcesPath;
   if (resourcesPath) {
     const packaged = join(resourcesPath, 'runtime', 'node.exe');
-    if (existsSync(packaged)) return { bin: packaged, electronRunAsNode: false };
+    if (existsSync(packaged)) return packaged;
   }
 
   const dev = join(appRoot(), 'resources', 'runtime', 'node.exe');
-  if (existsSync(dev)) return { bin: dev, electronRunAsNode: false };
+  if (existsSync(dev)) return dev;
 
-  return { bin: 'node', electronRunAsNode: false };
+  return 'node';
 }
 
 interface DesktopConfig {
@@ -245,14 +231,12 @@ function createReadinessParser(): { push(chunk: string): string | undefined } {
 
 export function launchDsh(options: DshLaunchOptions = {}): DshLaunchResult {
   const dshBin = resolveDshBin();
-  const { bin: nodeBin, electronRunAsNode } = resolveNodeBin();
+  const nodeBin = resolveNodeBin();
   const port = options.port ?? 0;
   // Force the loopback bind: dsh web itself refuses `--host 0.0.0.0`, but a
   // user profile patch could still bind all interfaces and expose the
   // remote-code-execution-capable server to the LAN. The CLI flag overrides it.
   const args = [
-    // --expose-internals is required by the HMR plugin bundled with dsh.
-    ...(electronRunAsNode ? ['--expose-internals'] : []),
     dshBin,
     'web',
     '--host',
@@ -271,9 +255,6 @@ export function launchDsh(options: DshLaunchOptions = {}): DshLaunchResult {
     env: {
       ...process.env,
       DSH_HOME: home,
-      // When running on the Electron binary, switch it into plain Node mode.
-      // Harmless when nodeBin is a real Node (the env var is ignored).
-      ELECTRON_RUN_AS_NODE: electronRunAsNode ? '1' : '',
       // Lets the harness know it is hosted by the desktop app (mirrors the
       // official desktop build) so the web UI can adapt (e.g. native pickers).
       DSH_DESKTOP: '1',

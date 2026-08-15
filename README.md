@@ -2,9 +2,7 @@
 
 One-click desktop launcher for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness). It starts the Harness Web UI in a native window with **zero setup** — the end user does not need Node.js or anything else installed.
 
-- **Zero dependency**: the Harness host runs on **Electron's own Node runtime**
-  (`ELECTRON_RUN_AS_NODE`), so `dsh web` runs out of the box — no portable Node,
-  no system Node, nothing else installed.
+- **Zero dependency**: a portable Node.js runtime is bundled, so `dsh web` runs out of the box.
 - **Portable & installable**: ship a single `.exe` (portable) or a per-user installer (NSIS).
 - **Auto port**: passes `--port 0` and parses the real URL from stdout — no port clashes.
 - **Loopback only**: forces `--host 127.0.0.1`, so the Harness server is never exposed to the LAN.
@@ -38,9 +36,8 @@ npm start          # compiles TS and launches Electron
 npm run dist       # compile + electron-builder --win
 ```
 
-Artifacts land in `release/`. The first build downloads electron-builder's NSIS
-tooling (once). No portable Node is fetched: the host runs on the Node runtime
-inside Electron itself (`ELECTRON_RUN_AS_NODE=1`).
+Artifacts land in `release/`. The first build downloads the portable Node runtime
+(once, cached in `resources/runtime/node.exe`) and electron-builder's NSIS tooling.
 
 > `npm run dist` refuses to run while DSH Desktop is running from
 > `release\win-unpacked` (the build clears that directory, and a running app
@@ -169,9 +166,7 @@ Notes:
 ```
 start.bat (dev only)
    └─ electron .            main process
-        ├─ spawn Electron-as-Node: <electron> --expose-internals dsh web --host 127.0.0.1 --port 0
-        │   (ELECTRON_RUN_AS_NODE=1 → the Electron binary acts as plain Node;
-        │    --expose-internals is required by dsh's bundled HMR plugin)
+        ├─ spawn <node> dsh web --host 127.0.0.1 --port 0   (bundled Node in packaged builds)
         ├─ parse stdout: "dsh web: http://127.0.0.1:PORT" (strict loopback/port validation)
         ├─ show a loading screen while dsh boots
         └─ open BrowserWindow at that URL (+ ?dsh-desktop-platform=win32)
@@ -179,17 +174,16 @@ start.bat (dev only)
             - all browser permission requests are denied
 ```
 
-`node_modules` is shipped unpacked (`asar: false`) so the Electron-as-Node
-runtime can read `@deepseek-ai/dsh` as plain files. Native modules are not
-rebuilt for Electron because `dsh` runs under the Node runtime inside Electron
-(`ELECTRON_RUN_AS_NODE=1`), not inside the renderer.
+`node_modules` is shipped unpacked (`asar: false`) so the bundled Node can read
+`@deepseek-ai/dsh` as plain files. Native modules are not rebuilt for Electron
+because `dsh` runs under the bundled Node, not inside Electron.
 
 ## Project structure
 
 ```
 src/electron/main.ts        window + lifecycle + navigation guard + permission hardening
-src/electron/dsh.ts         spawn dsh (Electron-as-Node) + strict readiness parser
-scripts/fetch-node.mjs      optional: download a portable Node (fallback, not used in dist)
+src/electron/dsh.ts         spawn dsh + resolve bundled Node / dsh bin + strict readiness parser
+scripts/fetch-node.mjs      download portable Node runtime
 scripts/generate-icon.mjs   regenerate the default build/icon.png & build/icon.ico
 scripts/import-icon.mjs     import a custom icon from build/icon-source.jpg
 scripts/guard-dist.mjs      predist guard: refuse to package while the app is running
@@ -315,9 +309,8 @@ downloaded update just as it does the initial installer.
 
 ## Contributing
 
-PRs welcome. Regenerate assets with `npm run icon` as needed; do not commit
-`release/` or `resources/runtime/` (the latter only holds the optional portable
-Node fallback).
+PRs welcome. Regenerate assets with `npm run icon` and `npm run fetch:node` as
+needed; do not commit `release/` or `resources/runtime/`.
 
 ## License
 

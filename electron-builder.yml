@@ -17,8 +17,8 @@ directories:
 # re-downloading it; speeds up builds and avoids a network/cache dependency.
 electronDist: node_modules/electron/dist
 
-# dsh runs under Electron's own Node (ELECTRON_RUN_AS_NODE=1), so node_modules
-# must be plain files that runtime can read — not packed inside app.asar.
+# dsh runs under a real Node (see scripts/fetch-node.mjs), so node_modules must
+# be plain files it can read — not packed inside app.asar.
 asar: false
 
 # Native modules (koffi) ship prebuilt binaries; do not rebuild for Electron.
@@ -39,6 +39,10 @@ files:
   - "!.gitignore"
   - "!electron-builder.yml"
   - "!**/*.map"
+
+extraResources:
+  - from: resources/runtime/node.exe
+    to: runtime/node.exe
 
 win:
   icon: build/icon.ico
