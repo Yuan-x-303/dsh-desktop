@@ -1,5 +1,5 @@
 import { join } from 'node:path';
-import { app, BrowserWindow, dialog, session, shell } from 'electron';
+import { app, BrowserWindow, dialog, Menu, session, shell } from 'electron';
 import { autoUpdater } from 'electron-updater';
 import { launchDsh, resolveLaunchPaths, type DshLaunchResult } from './dsh';
 
@@ -114,6 +114,36 @@ function createWindow(): BrowserWindow {
   );
   win.webContents.session.setPermissionRequestHandler((_wc, permission, callback) => {
     callback(isAllowed(permission));
+  });
+
+  // Electron ships NO default context menu, so right-clicking the Harness UI did
+  // nothing at all — users had to know the Ctrl+V shortcut to paste, and a
+  // web page cannot read the clipboard programmatically (execCommand('paste')
+  // is refused by Chromium), so a page-level "paste" could never work.
+  //
+  // These are native `role` items, executed by the main process rather than the
+  // page, so they are not subject to the renderer's clipboard restrictions.
+  // Enablement comes from `params.editFlags`, so the menu only offers actions
+  // that apply to whatever was clicked.
+  win.webContents.on('context-menu', (_event, params) => {
+    const { canCut, canCopy, canPaste, canSelectAll } = params.editFlags;
+    const template: Electron.MenuItemConstructorOptions[] = [];
+    if (canCut || canCopy || canPaste) {
+      template.push(
+        { role: 'cut', enabled: canCut },
+        { role: 'copy', enabled: canCopy },
+        { role: 'paste', enabled: canPaste },
+        { type: 'separator' },
+        { role: 'selectAll', enabled: canSelectAll }
+      );
+    } else if (params.selectionText.trim() !== '') {
+      // Read-only area (a rendered answer, a code block, a diff): copying is the
+      // only meaningful action.
+      template.push({ role: 'copy' }, { type: 'separator' }, { role: 'selectAll' });
+    } else {
+      return; // nothing useful to offer — stay out of the way
+    }
+    Menu.buildFromTemplate(template).popup({ window: win });
   });
 
   win.on('closed', () => {
