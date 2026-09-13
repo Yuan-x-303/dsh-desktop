@@ -96,12 +96,24 @@ function createWindow(): BrowserWindow {
   });
 
   // The web UI can request browser permissions (camera, geolocation, MIDI, ...).
-  // This shell serves a local agent host with arbitrary command execution; no
-  // renderer-side permission should ever be granted. Deny everything up front
-  // (mirrors the official desktop build).
-  win.webContents.session.setPermissionCheckHandler(() => false);
-  win.webContents.session.setPermissionRequestHandler((_wc, _permission, callback) => {
-    callback(false);
+  // This shell serves a local agent host with arbitrary command execution, so
+  // capabilities that expose hardware, location, or the network are denied.
+  //
+  // Clipboard WRITE is the deliberate exception. Electron treats it as a
+  // permission (`clipboard-sanitized-write`), and a blanket deny silently
+  // breaks the Harness's copy buttons: the UI calls
+  // navigator.clipboard.writeText() and only falls back to execCommand when
+  // that API is *absent* — not when it is rejected — so the failure produces no
+  // feedback at all. Writing to the user's own clipboard is not a privilege
+  // escalation for a local shell, so allow exactly that and nothing else.
+  const CLIPBOARD_WRITE = 'clipboard-sanitized-write';
+  const isAllowed = (permission: string): boolean => permission === CLIPBOARD_WRITE;
+
+  win.webContents.session.setPermissionCheckHandler((_wc, permission) =>
+    isAllowed(permission)
+  );
+  win.webContents.session.setPermissionRequestHandler((_wc, permission, callback) => {
+    callback(isAllowed(permission));
   });
 
   win.on('closed', () => {
