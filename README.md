@@ -23,7 +23,7 @@ Windows SmartScreen may warn on first run because binaries are not yet code-sign
 
 ## Develop
 
-Requirements: Node.js ≥ 20 (verified on v24). Built against `@deepseek-ai/dsh` 0.1.0-rc.6.
+Requirements: Node.js ≥ 20 (verified on v24). Built against `@deepseek-ai/dsh` 0.1.5-rc.2.
 
 ```bash
 npm install
@@ -234,24 +234,39 @@ The desktop shell is a thin wrapper; all features come from the bundled
 `@deepseek-ai/dsh` package, which does **not** update automatically. When a new
 Harness version ships, bump it by hand:
 
-1. Set the new version in `package.json`:
+1. Set the new version on **every** `@deepseek-ai/dsh*` entry in `package.json`
+   (they must move together — a mixed tree fails to resolve, because upstream
+   peer ranges routinely require the newest patch):
    ```json
-   "@deepseek-ai/dsh": "0.2.0"
+   "@deepseek-ai/dsh": "0.1.5-rc.2"
    ```
+   Leave `@deepseek-ai/cordis-plugin-group` alone; it is independently versioned.
 2. `npm install`
 3. `npm run dist`
 4. `npm run check:deps` — the dsh ecosystem declares many plugins as
    `peerDependencies`, which electron-builder does **not** bundle. This script
    diffs the dev and packaged `@deepseek-ai` trees and prints any missing
    package (with its exact version) plus a JSON snippet to paste into
-   `package.json`'s `dependencies`. Re-run `npm install && npm run dist` until
-   it reports no gaps.
+   `package.json`'s `dependencies`. **It reads `release/win-unpacked`, so it must
+   run *after* `npm run dist`** — it aborts with a hint if that tree is absent.
+   Re-run `npm install && npm run dist && npm run check:deps` until it reports
+   no gaps.
 5. Smoke-test `release\win-unpacked\DSH Desktop.exe`.
-6. Bump the app version, then `git tag v0.3.0 && git push origin --tags`.
+6. Bump the app version, then `git tag vX.Y.Z && git push origin --tags`.
 
 > The explicit `@deepseek-ai/*` entries in `package.json`'s `dependencies`
 > exist **because** of step 4 — they are the peer dependencies the launcher must
 > declare so electron-builder includes them. Keep them when upgrading.
+
+> **`allowScripts` is version-pinned on purpose.** npm ≥ 11 holds lifecycle
+> scripts until each package is approved, and `package.json`'s `allowScripts`
+> records those approvals keyed by exact version (`koffi@3.2.1`). When one of
+> these packages bumps, its key stops matching and the script is quietly
+> skipped — npm only warns. Native binaries normally still arrive prebuilt via
+> optional platform deps (`@koromix/koffi-win32-x64`), so this is not fatal, but
+> if a future build misbehaves, check `npm approve-scripts --allow-scripts-pending`
+> first. The list is local policy and is not carried in `package-lock.json`, so a
+> CI `npm ci` will not fail over it.
 
 > **Session format compatibility**: session logs carry a format version. If a
 > newer upstream Harness bumps that version, older builds refuse to open the

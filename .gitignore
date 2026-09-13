@@ -6,6 +6,8 @@ release/
 resources/runtime/
 *.log
 config.json
+# machine-specific npm cache redirect (sandbox workaround)
+.npmrc
 
 # Local icon workflow artifacts
 icon-preview.png

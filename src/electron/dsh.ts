@@ -159,10 +159,12 @@ function ensureDir(dir: string, what: string): void {
 // Readiness-line parsing (mirrors the official desktop app's strict parser).
 //
 // `dsh web` prints a single readiness line of the form:
-//     dsh web: http://127.0.0.1:PORT
+//     dsh web: http://127.0.0.1:PORT              (older dsh)
+//     dsh web: http://127.0.0.1:PORT/?token=...   (dsh >= 0.1.5, authenticated)
 // We buffer stdout by chunks (a line can straddle chunk boundaries), require
-// the URL to be loopback HTTP with an explicit integer port and nothing else,
-// and reject conflicting readiness URLs.
+// the URL to be loopback HTTP with an explicit integer port and at most a
+// `token` query parameter, and reject conflicting readiness URLs. The full URL
+// (token included) is returned so the window can authenticate.
 // ---------------------------------------------------------------------------
 
 const READINESS_PREFIX = 'dsh web: ';
@@ -171,32 +173,36 @@ const DEFAULT_READINESS_TIMEOUT_MS = 90_000;
 /** Assert and normalize one readiness line; undefined if it is not one. */
 function parseReadinessLine(line: string): string | undefined {
   if (!line.startsWith(READINESS_PREFIX)) return undefined;
-  const token = line.slice(READINESS_PREFIX.length).split(/\s/u, 1)[0];
-  if (token === undefined) {
+  const raw = line.slice(READINESS_PREFIX.length).split(/\s/u, 1)[0];
+  if (raw === undefined) {
     throw new Error(`dsh readiness line has no URL: ${line}`);
   }
   let url: URL;
   try {
-    url = new URL(token);
+    url = new URL(raw);
   } catch {
-    throw new Error(`dsh readiness URL is invalid: ${token}`);
+    throw new Error(`dsh readiness URL is invalid: ${raw}`);
   }
   const port = Number(url.port);
   const isLoopback = url.hostname === '127.0.0.1' || url.hostname === 'localhost';
-  const isBareHttp =
+  // Newer dsh announces an authenticated URL with a single `token` query
+  // parameter; older dsh announces a bare URL. Anything else is rejected.
+  const hasOnlyToken =
+    url.search === '' || (url.searchParams.size === 1 && url.searchParams.has('token'));
+  const isLoopbackHttp =
     url.protocol === 'http:' &&
     url.pathname === '/' &&
-    url.search === '' &&
     url.hash === '' &&
+    hasOnlyToken &&
     Number.isInteger(port) &&
     port >= 1 &&
     port <= 65535;
-  if (!isLoopback || !isBareHttp) {
+  if (!isLoopback || !isLoopbackHttp) {
     throw new Error(
-      `dsh readiness URL must be loopback HTTP with an explicit port: ${token}`
+      `dsh readiness URL must be loopback HTTP with an explicit port: ${raw}`
     );
   }
-  return url.origin;
+  return url.toString();
 }
 
 /** Incremental chunk-based parser that is stable once readiness is reached. */
@@ -243,6 +249,9 @@ export function launchDsh(options: DshLaunchOptions = {}): DshLaunchResult {
     '127.0.0.1',
     '--port',
     String(port),
+    // The desktop shell renders the UI itself; never let dsh pop the system
+    // browser (newer dsh auto-opens unless told otherwise).
+    '--no-open',
     ...(options.extraArgs ?? []),
   ];
 
